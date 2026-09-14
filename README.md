@@ -1,4 +1,24 @@
 # Cards Onboarding UAT — Jira Bug Filing Automation
+> ### What this repository is
+>
+> A method write-up of an agent-assisted UAT triage cycle, not a tool you install.
+> There is no package here: the workflow runs through an AI browser-automation
+> agent against a client's Jira, and both the findings and the tracker are
+> confidential.
+>
+> `uat_bug_report.js` is the structured input that workflow consumed. It is not a
+> file in this repository — do not look for it here; its shape is documented below
+> so you can build the equivalent.
+>
+> The numbers — 29 raw findings resolving to 18 matched, 11 new and 1 comment-only
+> — come from one real cycle.
+>
+> What you can take from it: the dedup-before-create ordering, the classification
+> schema, and the human review gate, which is the transferable part. The Jira REST
+> patterns underneath it are published as runnable code in
+> [spa-automation-toolkit](https://github.com/sayandip1987/spa-automation-toolkit)
+> (`examples/jira-bulk-edit.js`).
+
 
 AI-assisted UAT bug triage, deduplication, and batch Jira ticket creation for the client's UK cards onboarding web application (`cards-onboarding-web`). Bridges a structured UAT bug report (`uat_bug_report.js`) with Jira via an AI browser-automation agent (Claude Cowork / Claude Code) to deduplicate findings, batch-create new tickets, and enrich existing ones — all in a single browser session.
 
