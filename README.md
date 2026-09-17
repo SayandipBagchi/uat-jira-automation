@@ -1,4 +1,6 @@
-# Cards Onboarding UAT, Jira Bug Filing Automation
+# UAT findings into Jira tickets, without the duplicate debt
+
+One P2 security finding was discovered during testing: the session return URL bypassed mobile authentication when pasted manually in a new tab after expiry. It was filed independently of the original bug report.
 
 > ### What this repository is
 >
@@ -22,6 +24,18 @@
 > [spa-automation-toolkit](https://github.com/sayandip1987/spa-automation-toolkit)
 > (`examples/jira-bulk-edit.js`).
 
+## The classifier is a judge, and the gate is what makes it safe
+
+The deduplication step asks a model to decide, for each of 29 findings, whether it matches an existing ticket. That is an LLM-as-judge call, and it is the only place in this workflow where a wrong answer is expensive: a false match silently drops a real bug, and a false miss files a duplicate.
+
+Two things keep it usable. The question is narrow, a classification into four named outcomes (create new, enrich existing, add comment, skip) rather than an open judgement about what should happen. And nothing it decides is written without a person seeing the classification first, which is what the human gate is for. The gate is not a formality here. On this cycle it is what stood between 18 correct matches and 18 quiet omissions.
+
+The Error Compendium works the same way an eval suite does, in prose rather than code. Each entry is a failure that happened once, its root cause, and the rule that prevents it. Adding an entry before the next session resumes is the regression test. The difference from a real harness is that it is checked by a person rather than automatically, which is a weakness I have not fixed.
+
+**Observability here is the toast counter.** There is no logging layer; the only reliable signal that a ticket was actually saved is the counter incrementing by exactly 1. Verifying it after every Create is what turns a silent validation failure into a caught one, and it is the cheapest instrumentation in the whole workflow.
+
+## What this workflow is
+
 AI-assisted UAT bug triage, deduplication and batch Jira ticket creation for a
 client's UK cards onboarding web application (`cards-onboarding-web`). It bridges
 a structured UAT bug report (`uat_bug_report.js`) with Jira through an AI
@@ -37,7 +51,6 @@ enrich existing ones in a single browser session.
 - 29 raw UAT findings processed into 18 matched against existing Jira tickets with no duplicates created, 12 net-new tickets with consistent shape, and 1 grammar comment on a pre-existing ticket
 - Deduplication-first workflow, filtered against existing tickets carrying labels `R5` and `Onboarding`, classifying each finding as create new, enrich existing, add comment or skip. This is what stops duplicate-ticket debt accumulating across UAT cycles
 - Batch ticket creation in a single browser session, using a "Create another" pattern that retains Priority, Parent epic and Labels between submissions. File all P1s together, change priority once per group, file all P4s, and so on
-- One P2 security finding discovered during testing: the session return URL bypassed mobile authentication when pasted manually in a new tab after expiry. Filed independently of the original bug report
 - Consistent ticket shape on every new bug. The Steps to Reproduce / Actual / Expected / Environment / Impact template is applied uniformly, so developer triage is faster and reporting and filtering are reliable
 - Three reusable skills packaged in version-controlled `SKILL.md` files: `jira-creation`, `jira-sync-up`, `web-testing`, each with explicit trigger phrases, behaviours and coordinate references
 - Six automation errors documented with their fixes in an Error Compendium, so future sessions do not repeat known failure modes
@@ -109,7 +122,7 @@ enrich existing ones in a single browser session.
 
 **Phase 0, deduplication, always first.** Run the `jira-sync-up` skill before creating anything. JQL filter: `project = PROJ AND labels = "R5" AND labels = "Onboarding" ORDER BY created DESC`. For each finding in `uat_bug_report.js`, classify as exact match (skip or enrich), partial match (create and add `Related to [PROJ-XXXX]`), no match (create new), or comment-only (add a comment to the most relevant existing ticket). Outcome on this cycle: 18 matched, 11 new, 1 comment.
 
-**Phase 1, one-time session setup, first ticket only.** Navigate to Bug Board backlog, click `+ Create`, click ⤢ to open the expanded modal, because the compact dialog does not expose Priority, Parent or Labels. Fill Summary, then Description using the standard template. Scroll about 4 ticks down, set Priority. Set Parent (`PROJ-404`, "Cards Application Onboarding - Web"). Scroll about 2 more ticks, add Labels `R5` and `Onboarding`. Scroll to the footer and tick "Create another". That tick is the highest-risk action in the workflow: missing it forces a full re-setup of Priority, Parent and Labels on every subsequent ticket. Click Create, then verify the toast shows "1 work item created".
+**Phase 1, one-time session setup, first ticket only.** Navigate to Bug Board backlog, click `+ Create`, click ⤢ to open the expanded modal, because the compact dialog does not expose Priority, Parent or Labels. Fill Summary, then Description using the standard template. Set Priority. Set Parent (`PROJ-404`, "Cards Application Onboarding - Web"). Add Labels `R5` and `Onboarding`. In the footer, tick "Create another". The scroll amounts for each of those are in [RUNBOOK.md](RUNBOOK.md). That tick is the highest-risk action in the workflow: missing it forces a full re-setup of Priority, Parent and Labels on every subsequent ticket. Click Create, then verify the toast shows "1 work item created".
 
 **Phase 2, subsequent tickets in the same priority group.** The form resets Summary and Description but retains Priority, Parent and Labels. For each subsequent ticket: scroll up about 10 ticks, Summary, Description, scroll down about 10 ticks, Create. Verify the toast counter increments by exactly 1 (`"2 work items created"`, `"3 work items created"`, and so on). If the counter does not increment the ticket was not created, so scroll up and check for red-bordered fields.
 
@@ -191,35 +204,7 @@ Impact:
 
 Rows 1 to 11 come from the bug report. Row 12 was found during testing. All carry labels `R5 + Onboarding` and parent epic `PROJ-404`.
 
-## Modal navigation, coordinate reference (1469 × 837 viewport)
-
-Atlaskit's Create Bug modal is taller than the viewport and uses styled `<div>` elements for dropdowns, with no semantic `<button>`. DOM-based discovery fails, so coordinate clicks are required.
-
-| Element | Coordinate | Notes |
-|---|---|---|
-| Summary field | `[727, 493]` | When form is scrolled to top |
-| Description body | `[727, 655]` | Click inside text-area body, not the toolbar, because a toolbar click is a no-op |
-| Priority dropdown | `[534, 392]` | When scrolled ~4 ticks from top |
-| P1 / P2 / P3 / P4 options | inside open Priority dropdown | Position varies; verify visually |
-| Create button | `[1057, 733]` | Fixed in footer |
-| Cancel button | `[975, 733]` | Fixed in footer |
-
-Scroll-amount cheat-sheet (same viewport):
-- `~10 ticks up` from anywhere goes to the top, with Summary visible
-- `~4 ticks down` from top makes Priority and Parent visible
-- `~6–7 ticks down` from top makes Labels visible
-- `~10–12 ticks down` from top reaches the footer, with the Create button and "Create another" checkbox
-
-## Error compendium, fixes from real sessions
-
-| ID | Symptom | Root cause | Rule |
-|---|---|---|---|
-| ERR-001 | `Failed to execute action: Unsupported action: click` | Computer-use protocol vocabulary doesn't include `"click"` | Always pass `action: "left_click"`. Other valid mouse actions: `right_click`, `double_click`, `middle_click`, `mouse_move`, `left_click_drag` |
-| ERR-002 | `Failed to execute JavaScript: 'javascript_exec' is the only supported action` | The browser JS-execution tool only accepts a single `action` value | Always pass `action: "javascript_exec"`. No other value works |
-| ERR-003 | DOM query for Priority dropdown options returns empty | Atlaskit dropdowns are styled `<div>`s with no `role="button"`. Walking up 8 DOM levels from the text node finds no semantic button anywhere | For any Jira dropdown (Priority, Status, Labels, Parent) click by coordinate using `left_click`. Never attempt `querySelector('button')` or `role="button"` |
-| ERR-004 | Action taken on a stale assumption about modal state after a context reset | Across context-window boundaries, the lossy summary cannot reliably encode exact form state (filled fields, "Create another" status, scroll position) | First action in any resumed session is `screenshot`. Don't type, click or scroll until ground-truth state is visually confirmed |
-| ERR-005 | Modal closes after Create; Priority + Parent + Labels reset | "Create another" checkbox state is not persisted across Jira page reloads, and defaults to unchecked | In the first scroll-to-bottom of any batch session, visually verify the checkbox is ticked. Costs about 3 minutes per occurrence if missed |
-| ERR-006 | Typing goes to the toolbar or no-ops on Description | Description uses a Prosemirror/Tiptap-style rich-text editor with a toolbar above and text-area body below. A click on the toolbar doesn't activate the body | Click `[727, 655]` with the form scrolled so Summary is at top. Verify cursor before typing |
+The click coordinates, the scroll amounts and the six documented automation errors with their fixes are in [RUNBOOK.md](RUNBOOK.md).
 
 ## Best practices, ranked by consequence of getting them wrong
 
@@ -253,16 +238,6 @@ A triage cycle runs longer than one context window. 29 findings, a Jira board to
 **Keep the working set small on purpose.** Findings are processed in priority groups rather than all 29 at once, which is a batching decision for the Jira form and a context decision as well. One group means one priority, one parent and one label set held in mind, and the only things changing per ticket are Summary and Description.
 
 **Screenshot IDs are session-scoped, which is a context bug waiting to happen.** Capturing them as you go rather than collecting them at the end is in the list below for this reason: an ID that only exists in the current window is not a durable reference, and treating it as one loses evidence when the session ends abruptly.
-
-## The classifier is a judge, and the gate is what makes it safe
-
-The deduplication step asks a model to decide, for each of 29 findings, whether it matches an existing ticket. That is an LLM-as-judge call, and it is the only place in this workflow where a wrong answer is expensive: a false match silently drops a real bug, and a false miss files a duplicate.
-
-Two things keep it usable. The question is narrow, a classification into four named outcomes (create new, enrich existing, add comment, skip) rather than an open judgement about what should happen. And nothing it decides is written without a person seeing the classification first, which is what the human gate is for. The gate is not a formality here. On this cycle it is what stood between 18 correct matches and 18 quiet omissions.
-
-The Error Compendium works the same way an eval suite does, in prose rather than code. Each entry is a failure that happened once, its root cause, and the rule that prevents it. Adding an entry before the next session resumes is the regression test. The difference from a real harness is that it is checked by a person rather than automatically, which is a weakness I have not fixed.
-
-**Observability here is the toast counter.** There is no logging layer; the only reliable signal that a ticket was actually saved is the counter incrementing by exactly 1. Verifying it after every Create is what turns a silent validation failure into a caught one, and it is the cheapest instrumentation in the whole workflow.
 
 ## What I'd do differently
 
